@@ -21,6 +21,7 @@ ui <- fluidPage(
     uiOutput("dplyrOperations"),
     uiOutput("dplyrOperationsSelect"),
     uiOutput("dplyrOperationsGroup"),
+    textOutput("dplyrOperationsMutateLabel"),
     uiOutput("dplyrOperationsMutate"), 
     uiOutput("dplyrOperationsArrange"),
     uiOutput("dplyrOperationsFilter"),
@@ -111,10 +112,16 @@ server <- function(input, output){
       selectInput("dplyrOperationsGroup", "Select the variable you would like to group by.", items, multiple=FALSE)
   })
   
+  output$dplyrOperationsMutateLabel = renderText({
+  	    req(input$action1)
+    if ("mutate" %in% input$dplyrOperations)
+    paste("Enter the expression(s) you would like to have appended to your dataset as additional columns. If multiple expressions are entered, they must be separated by an exclamation point (!).")
+  })
+  
   output$dplyrOperationsMutate = renderUI({
     req(input$action1)
     if ("mutate" %in% input$dplyrOperations)
-      textInput("dplyrOperationsMutate", "Enter the expression(s) you would like to compute.", placeholder="Example: mean(age)")
+    tags$textarea(id="dplyrOperationsMutate", rows=5, cols=40, placeholder="Example: rank(age) ! mean(age) ! age - mean(age)")
   })
   
   output$dplyrOperationsArrange = renderUI({
@@ -137,11 +144,30 @@ server <- function(input, output){
   myList = list()
   instructions = function(selectVar=NULL, groupVar=NULL, arrangeVar=NULL, filterVar=NULL, mutateVar=NULL){  
     
+    
+    # myListMelt() will take a list with 1 character vector of length n and convert it to 
+	# a list of n elements each with 1 character vector of length 1 
+
+    myListMelt = function(thelist){
+	total = length(thelist[[1]])
+	newlist = list()
+	for (i in 1:total){
+		newlist[[i]] = thelist[[1]][i]
+	}
+	return(newlist)
+}
+
+	
+	# Mutate has different input than other dplyr operations (textInput), so we need to use strsplit 
+	myDelimiter = "!"
+	mutateVar2 = strsplit(mutateVar, myDelimiter)
+
+
     selectVarList = as.list(selectVar)
     groupVarList = as.list(groupVar)
     arrangeVarList = as.list(arrangeVar)
     filterVarList = as.list(filterVar)
-    mutateVarList = as.list(mutateVar)
+    mutateVarList = myListMelt(mutateVar2)
     
     myList = list(
       # limit to some variables
@@ -154,8 +180,7 @@ server <- function(input, output){
     
     return(myList)
   }
-  
-  
+    
   perform_transformation = function(instructions, given_df) {
     # Perform the specified transformation
     transformed_df = given_df
@@ -176,8 +201,7 @@ server <- function(input, output){
       transformed_df = transform_fn(transformed_df, .dots=setNames(entry$dots, entry$names))
     }
     return(transformed_df)
-  }
-  
+  }  
   
   
   output$wrangled = renderTable({  
