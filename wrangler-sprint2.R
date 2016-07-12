@@ -1,6 +1,7 @@
 library(shiny)
 library(dplyr)    # For the data wrangling
 library(lazyeval) 
+library(shinyURL) # to save state
 
 ui <- fluidPage(
   headerPanel("Data Wrangler for Wordsmith"),
@@ -10,11 +11,10 @@ ui <- fluidPage(
     hr(),
     fileInput(inputId = "datafile", label= "Choose CSV file", 
               accept='.csv'),
-    textOutput("filedim"), 
-    checkboxInput("missing", "There are missing value codes in my dataset", value=FALSE), br(),
+    uiOutput("missing"), br(),
     uiOutput("missingvalues"), br(),
 
-    actionButton("action1", "Apply changes"), br(), br(), br(), 
+    br(), br(), br(), 
     
     hr(), 
     "Choose wrangling options below.", br(), br(),
@@ -25,16 +25,19 @@ ui <- fluidPage(
     uiOutput("dplyrOperationsMutate"), 
     uiOutput("dplyrOperationsArrange"),
     uiOutput("dplyrOperationsFilter"),
-    actionButton("action2", "Wrangle!"), br(), br(), br()
+    br(), br(), br(),
+    shinyURL.ui(),
+    actionButton("save", "Save Wrangled Data")
   ),
   
   mainPanel(
     tabsetPanel(
       tabPanel("data", 
+      		   textOutput("filedim"), 
                textOutput("filehead"), br(), br(),
                tableOutput("filetable")),
       tabPanel("wrangled", 
-               textOutput("myInstructions"),
+              textOutput("myInstructions"),
               tableOutput("wrangled"))
         )
     )
@@ -43,8 +46,9 @@ ui <- fluidPage(
 
 
 
-server <- function(input, output){
+server <- function(input, output, server){
   require(shiny)
+  require(shinyURL)
   require(psych)
   require(dplyr)
   require(lazyeval)
@@ -52,34 +56,33 @@ server <- function(input, output){
   
   #Load in the selected file
   filedata = reactive({ 
+  	req(input$datafile)
     infile = input$datafile
-    if (is.null(infile)){
-      return(NULL)
-    }
     read.csv(infile$datapath, na.strings=input$missingvalues, stringsAsFactors=FALSE)
-  })
+    })
+  
+  output$missing = renderUI({
+  	radioButtons("missing", "Are there missing value codes present in your dataset?", 
+  				 choices=c("Yes", "No"), selected="No") 
+  	})
   
   output$missingvalues = renderUI({
-    req(input$missing)
+    if (req(input$missing)=="Yes"){
     textInput(inputId = "missingvalues", 
               label="Enter any missing value codes that are present in your data (ex. -999, ., NA).
               If multiple missing value codes are present, separate them with commas.",
               value="")
+    }
   })
   
   #The file you uploaded has X rows and Y columns 
   output$filedim = renderText({    
-                                   df = filedata()
-                                   if (is.null(df)) return()
-                                   paste("The file you uploaded has", dim(df)[1], "rows and", dim(df)[2], "columns.")
-                                 })
+      df = filedata()
+      paste("The file you uploaded has", dim(df)[1], "rows and", dim(df)[2], "columns.")
+  })
   
   
   output$filehead <- renderText({ 
-    if (is.null(filedata())){
-      return(NULL)
-    }
-    br()
     paste("Below is a preview of your dataset.")
   })
   
@@ -91,13 +94,11 @@ server <- function(input, output){
   
   # Data wrangling options all stored as output$dplyrXXX
   output$dplyrOperations = renderUI({
-    req(input$action1)
     items = c("select", "group", "mutate", "filter", "arrange")
     selectInput("dplyrOperations", "Select all of the data wrangling techniques you would like performed.", items, multiple=TRUE)
   })
   
   output$dplyrOperationsSelect = renderUI({
-    req(input$action1)
     df = filedata()
     items = names(df)
     if ("select" %in% input$dplyrOperations)
@@ -105,7 +106,6 @@ server <- function(input, output){
   })
   
   output$dplyrOperationsGroup = renderUI({
-    req(input$action1)
     df = filedata()
     items = names(df)
     if ("group" %in% input$dplyrOperations)
@@ -113,19 +113,16 @@ server <- function(input, output){
   })
   
   output$dplyrOperationsMutateLabel = renderText({
-  	    req(input$action1)
     if ("mutate" %in% input$dplyrOperations)
     paste("Enter the expression(s) you would like to have appended to your dataset as additional columns. If multiple expressions are entered, they must be separated by an exclamation point (!).")
   })
   
   output$dplyrOperationsMutate = renderUI({
-    req(input$action1)
     if ("mutate" %in% input$dplyrOperations)
     tags$textarea(id="dplyrOperationsMutate", rows=5, cols=40, placeholder="Example: rank(age) ! mean(age) ! age - mean(age)")
   })
   
   output$dplyrOperationsArrange = renderUI({
-    req(input$action1)
     df = filedata()
     items = names(df)
     if ("arrange" %in% input$dplyrOperations)
@@ -133,7 +130,6 @@ server <- function(input, output){
   })
   
   output$dplyrOperationsFilter = renderUI({
-    req(input$action1)
     if ("filter" %in% input$dplyrOperations)
       textInput("dplyrOperationsFilter", "Enter the expression you would like to filter by.", placeholder="Example: age > 25")
   })
@@ -203,9 +199,9 @@ server <- function(input, output){
     return(transformed_df)
   }  
   
-  
-  output$wrangled = renderTable({  
-    req(input$action2)
+  # Create the reactive expression 
+   dplyrReactive = reactive({  
+   	# req() 
     df = filedata()
     # Create instruction list based on user input
     myInstructions = instructions(selectVar = input$dplyrOperationsSelect,
@@ -216,8 +212,17 @@ server <- function(input, output){
     # Wrangle the data
     perform_transformation(myInstructions, df)  }) 
   
+  # Display results 
+  output$wrangled = renderTable({ dplyrReactive() })
+  
+  shinyURL.server()
+  
+  observeEvent(input$save,
+  	{ write.csv(dplyrReactive(), "wrangled_data.csv", row.names=FALSE)
+  	})
   
 }
 
 
 shinyApp(ui, server)
+  
